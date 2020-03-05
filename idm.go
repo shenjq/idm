@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/golang/glog"
+	_ "github.com/icattlecoder/godaemon"
 	"idm/busii"
 	"idm/conf"
 	"idm/pub"
@@ -17,6 +18,7 @@ func main() {
 	prepare()
 
 	var err error
+	glog.V(0).Infof("initconf ...\n")
 	err = conf.InitConf()
 	if err != nil {
 		glog.V(0).Infof("initconf fail,err:%v\n", err)

@@ -348,7 +348,8 @@ func InitDayTask(datestr string) (err error) {
 		glog.V(0).Infof("Query failed,err:%v\n", err)
 		return
 	}
-	var id, taskname, planbgtm, planedtm, hero, idxid, rate string
+	var planbgtm, planedtm, idxid sql.NullString
+	var id, taskname, hero, rate string
 	var bgtime, edtime time.Time
 	sqlstr := `insert into task (id,taskname,planbgtm,planedtm,hero,idxid,stat) value(?,?,?,?,?,?,?)`
 	for rows.Next() {
@@ -369,8 +370,8 @@ func InitDayTask(datestr string) (err error) {
 		}
 
 		tmcount := 0
-		if len(strings.TrimSpace(planbgtm)) > 0 {
-			sp := strings.Split(planbgtm, ":")
+		if planbgtm.Valid {
+			sp := strings.Split(planbgtm.String, ":")
 			if len(sp) < 2 {
 				glog.V(0).Infof("planbgtm format err,%s.", planbgtm)
 				continue
@@ -390,8 +391,8 @@ func InitDayTask(datestr string) (err error) {
 			}
 			tmcount++
 		}
-		if len(strings.TrimSpace(planedtm)) > 0 {
-			sp := strings.Split(planedtm, ":")
+		if planedtm.Valid {
+			sp := strings.Split(planedtm.String, ":")
 			if len(sp) < 2 {
 				glog.V(0).Infof("planedtm format err,%s.", planedtm)
 				continue

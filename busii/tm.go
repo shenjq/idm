@@ -315,6 +315,7 @@ func InitNextDayTask() (err error) {
 
 //根据日期(格式Yyyymmdd)初始化当日任务表
 func InitDayTask(datestr string) (err error) {
+	defer glog.Flush()
 	tx, err := gTB.Db.Begin()
 	if err != nil {
 		return
@@ -330,6 +331,7 @@ func InitDayTask(datestr string) (err error) {
 	}()
 
 	glog.V(3).Infof("启动初始化[%s]任务表......", datestr)
+	glog.Flush()
 	//删除task表原数据
 	str := fmt.Sprintf("delete from task where id like '%s%%'", datestr)
 	_, err = tx.Exec(str)
@@ -353,10 +355,11 @@ func InitDayTask(datestr string) (err error) {
 	var bgtime, edtime time.Time
 	sqlstr := `insert into task (id,taskname,planbgtm,planedtm,hero,idxid,stat) value(?,?,?,?,?,?,?)`
 	for rows.Next() {
+		glog.Flush()
 		err = rows.Scan(&id, &taskname, &planbgtm, &planedtm, &hero, &idxid, &rate)
 		if err != nil {
-			glog.V(0).Infof("Scan failed,err:%v\n", err)
-			return
+			glog.V(0).Infof("Scan failed,id=%s,err:%v\n", id, err)
+			continue
 		}
 		glog.V(3).Infof(">>启动任务%s,%s的初始化---->", id, taskname)
 		var isTask bool
@@ -373,13 +376,13 @@ func InitDayTask(datestr string) (err error) {
 		if planbgtm.Valid {
 			sp := strings.Split(planbgtm.String, ":")
 			if len(sp) < 2 {
-				glog.V(0).Infof("planbgtm format err,%s.", planbgtm)
+				glog.V(0).Infof("planbgtm format err,%s.", planbgtm.String)
 				continue
 			}
 			iH, e1 := strconv.Atoi(sp[0])
 			iM, e2 := strconv.Atoi(sp[1])
 			if e1 != nil || e2 != nil {
-				glog.V(0).Infof("planbgtm format err,%s.", planbgtm)
+				glog.V(0).Infof("planbgtm format err,%s.", planbgtm.String)
 				continue
 			}
 			tmstr1 := fmt.Sprintf("%s%02d:%02d", datestr, iH, iM)
@@ -394,13 +397,13 @@ func InitDayTask(datestr string) (err error) {
 		if planedtm.Valid {
 			sp := strings.Split(planedtm.String, ":")
 			if len(sp) < 2 {
-				glog.V(0).Infof("planedtm format err,%s.", planedtm)
+				glog.V(0).Infof("planedtm format err,%s.", planedtm.String)
 				continue
 			}
 			iH, e1 := strconv.Atoi(sp[0])
 			iM, e2 := strconv.Atoi(sp[1])
 			if e1 != nil || e2 != nil {
-				glog.V(0).Infof("planedtm format err,%s.", planedtm)
+				glog.V(0).Infof("planedtm format err,%s.", planedtm.String)
 				continue
 			}
 			tmstr2 := fmt.Sprintf("%s%02d:%02d", datestr, iH, iM)
@@ -419,10 +422,10 @@ func InitDayTask(datestr string) (err error) {
 		glog.V(6).Infof("id:%s,bgtime:%v,edtime:%v", id, bgtime, edtime)
 		//逐条插入task表
 		var result sql.Result
-		result, err = tx.Exec(sqlstr, datestr+id, taskname, bgtime, edtime, hero, idxid, "0")
+		result, err = tx.Exec(sqlstr, datestr+id, taskname, bgtime, edtime, hero, idxid.String, "0")
 		if err != nil {
 			glog.V(0).Infof("insert into task failed,err:%v\n", err)
-			return
+			continue
 		}
 		glog.V(3).Infof("任务%s初始化成功.", datestr+id)
 		glog.V(6).Infoln(result.RowsAffected())

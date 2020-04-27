@@ -16,6 +16,7 @@ var gArgs = make(map[string]string)
 
 func main() {
 	prepare()
+	defer glog.Flush()
 
 	var err error
 	glog.V(0).Infof("initconf ...\n")
@@ -51,6 +52,7 @@ func main() {
 	go busii.GetTB().DoTmBusi()
 
 	glog.V(0).Info("start server ...")
+	glog.Flush()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/help", Middle(help))
 	mux.HandleFunc("/idx", Middle(busii.Idx_handler))
@@ -59,8 +61,10 @@ func main() {
 	err = http.ListenAndServe("0.0.0.0:8080", mux)
 	if err != nil {
 		glog.V(0).Infof("http.ListenAndServe fail,err:%v\n", err)
+		glog.Flush()
 		return
 	}
+	fmt.Printf("服务启动完成。\n")
 }
 
 func Middle(f http.HandlerFunc) http.HandlerFunc {

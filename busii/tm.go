@@ -224,7 +224,7 @@ func (t *Task) updateTask() (err error) {
 	}()
 
 	if t.Stat == "E" {
-		instr := `insert task_note (id,tm,host,note) values (?,?,?)`
+		instr := `insert task_note (id,tm,host,note) values (?,?,?,?)`
 		_, err = tx.Exec(instr, t.Id, t.Tm, t.Host, t.Note)
 		if err != nil {
 			glog.V(0).Infof("insert into task_note failed,err:%v\n", err)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/golang/glog"
+	"idm/conf"
 	"idm/pub"
 	"io/ioutil"
 	"net/http"
@@ -14,9 +15,10 @@ import (
 )
 
 type Index struct {
-	Id    string  `json:"id"` //字段首字符大写！！！
-	Value float32 `json:"value"`
-	Host  string  `json:"host"`
+	Id     string  `json:"id"` //字段首字符大写！！！
+	Value  float32 `json:"value"`
+	Host   string  `json:"host"`
+	realId string
 }
 
 type Idxinfo struct {
@@ -24,6 +26,7 @@ type Idxinfo struct {
 	Name   string
 	Note   string
 	Unit   string
+	EmpNo  sql.NullString
 	Flag   sql.NullString  //标识
 	Lv     sql.NullFloat64 //低水位
 	Sv     sql.NullFloat64 //标准水位
@@ -85,7 +88,7 @@ func InitIdxinfo() (err error) {
 	var tmpmap = make(map[string]Idxinfo, 256)
 	glog.V(1).Info("start InitIdxinfo...")
 	idxif := new(Idxinfo)
-	rows, err := gIB.Db.Query("select a.*,b.flag,b.lv,b.sv,b.uv from idx_list a LEFT JOIN idx_warn b ON a.id=b.id;")
+	rows, err := gIB.Db.Query("select a.id,a.name,a.note,a.unit,a.empno,b.flag,b.lv,b.sv,b.uv from idx_list a LEFT JOIN idx_warn b ON a.id=b.id;")
 	if err != nil {
 		glog.V(0).Infof("Query failed,err:%v\n", err)
 		return err
@@ -97,7 +100,7 @@ func InitIdxinfo() (err error) {
 	}()
 
 	for rows.Next() {
-		err = rows.Scan(&idxif.Id, &idxif.Name, &idxif.Note, &idxif.Unit, &idxif.Flag, &idxif.Lv, &idxif.Sv, &idxif.Uv) //不scan会导致连接不释放
+		err = rows.Scan(&idxif.Id, &idxif.Name, &idxif.Note, &idxif.Unit, &idxif.EmpNo, &idxif.Flag, &idxif.Lv, &idxif.Sv, &idxif.Uv) //不scan会导致连接不释放
 		if err != nil {
 			glog.V(0).Infof("Scan failed,err:%v\n", err)
 			return
@@ -233,9 +236,9 @@ func Idx_handler(w http.ResponseWriter, r *http.Request) {
 				return
 			} else {
 				if hok {
-					idx = Index{id[0], float32(value), host[0]}
+					idx = Index{id[0], float32(value), host[0], ""}
 				} else {
-					idx = Index{id[0], float32(value), clientIp}
+					idx = Index{id[0], float32(value), clientIp, ""}
 				}
 			}
 		}
@@ -282,10 +285,22 @@ func (idx *Index) updateIdx() (err error) {
 		}
 	}()
 
+	//考虑到类似共性类指标
+	//如主机ops、obs等，指标：020105X，该类指标最后一位为x，在写入idx_now,idx_his表时，将指标进行替换为020105CA3001
+	var needupdate bool
+	if strings.HasSuffix(idx.Id, "X") || strings.HasSuffix(idx.Id, "x") {
+		idx.realId = idx.Id[:len(idx.Id)-1] + strings.ToUpper(idx.Host)
+		needupdate = false
+	} else {
+		needupdate = v.Needup
+		idx.realId = idx.Id
+	}
+	glog.V(4).Infof("%s,%v\n", idx.realId, needupdate)
+
 	tm := time.Now()
 	var result sql.Result
 	sqlstr_insthis := `insert into idx_his (id,time,host,value) values(?,?,?,?)`
-	result, err = tx.Exec(sqlstr_insthis, idx.Id, tm, idx.Host, idx.Value)
+	result, err = tx.Exec(sqlstr_insthis, idx.realId, tm, idx.Host, idx.Value)
 	if err != nil {
 		glog.V(0).Infof("insert into idx_his err,%v", err)
 		return
@@ -294,8 +309,8 @@ func (idx *Index) updateIdx() (err error) {
 
 	sqlstr_instnow := `insert into idx_now (id,time,host,value) values(?,?,?,?)`
 	sqlstr_upnow := `update idx_now set time=?,host=?,value=? where id=?`
-	if v.Needup {
-		result, err = tx.Exec(sqlstr_upnow, tm, idx.Host, idx.Value, idx.Id)
+	if needupdate {
+		result, err = tx.Exec(sqlstr_upnow, tm, idx.Host, idx.Value, idx.realId)
 		if err != nil {
 			glog.V(0).Infof("update idx_now err,%v", err)
 			return
@@ -309,13 +324,13 @@ func (idx *Index) updateIdx() (err error) {
 				return
 			}
 		*/
-		ct := pub.SelectCount("select count(id) count from idx_now where id =?", idx.Id)
+		ct := pub.SelectCount("select count(id) count from idx_now where id =?", idx.realId)
 		glog.V(3).Infof("判断是否需要插入指标数据，ct=%d\n", ct)
 		if ct == 0 {
-			result, err = tx.Exec(sqlstr_instnow, idx.Id, tm, idx.Host, idx.Value)
+			result, err = tx.Exec(sqlstr_instnow, idx.realId, tm, idx.Host, idx.Value)
 			//result,err = gIB.stmt_instnow.Exec(idx.Id, tm, idx.Host, idx.Value)
 		} else {
-			result, err = tx.Exec(sqlstr_upnow, tm, idx.Host, idx.Value, idx.Id)
+			result, err = tx.Exec(sqlstr_upnow, tm, idx.Host, idx.Value, idx.realId)
 			//result,err = gIB.stmt_upnow.Exec(tm, idx.Host, idx.Value, idx.Id)
 		}
 		if err != nil {
@@ -330,23 +345,84 @@ func (idx *Index) updateIdx() (err error) {
 }
 
 func (idx *Index) warn() (err error) {
-	v, _ := gIdxMap[idx.Id]
+	type warninfo struct {
+		Id_original  string `json:"id_original"`
+		Source       string `json:"source"`
+		Ip           string `json:"ip"`
+		Severity     string `json:"severity"`
+		Title        string `json:"title"`
+		Summary      string `json:"summary"`
+		Status       string `json:"status"`
+		ShowTimes    string `json:"showtimes"`
+		NoticeEmpNo1 string `json:"noticeempno1"`
+		NoticeEmpNo2 string `json:"noticeempno2"`
+	}
+	var v Idxinfo
+	v, ok := gIdxMap[idx.realId] //先找自有值，未找到情况再找公共值
+	if !ok {
+		v, _ = gIdxMap[idx.Id]
+	}
 	if !v.Flag.Valid {
 		glog.V(3).Infof("指标[%s]未定义预警信息.\n", idx.Id)
 		return nil
 	}
 
+	var warn_content string
+	warn_flag := true
 	switch []byte(v.Flag.String)[1] {
 	case '1': //不在区间
 		glog.V(3).Infof("Warn1:\n")
-	case '2': //不定于标准值
+		if float64(idx.Value) > v.Uv.Float64 {
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,大于%.2f", idx.realId, v.Name, idx.Value, v.Uv.Float64)
+		} else if float64(idx.Value) < v.Lv.Float64 {
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,小于%.2f", idx.realId, v.Name, idx.Value, v.Lv.Float64)
+		} else {
+			warn_flag = false
+		}
+	case '2': //不等于标准值
 		glog.V(3).Infof("Warn2:\n")
+		if float64(idx.Value) != v.Sv.Float64 {
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%f,不等于%f", idx.realId, v.Name, idx.Value, v.Sv.Float64)
+		} else {
+			warn_flag = false
+		}
 	case '3': //高于高水位
 		glog.V(3).Infof("Warn3:\n")
+		if float64(idx.Value) > v.Uv.Float64 {
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%f,大于%f", idx.realId, v.Name, idx.Value, v.Uv.Float64)
+		} else {
+			warn_flag = false
+		}
 	case '4': //低于低水位
 		glog.V(3).Infof("Warn4:\n")
+		if float64(idx.Value) < v.Lv.Float64 {
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%f,小于%f", idx.realId, v.Name, idx.Value, v.Lv.Float64)
+		} else {
+			warn_flag = false
+		}
 	default:
 		glog.V(3).Infof("warn:未定义\n")
+		warn_flag = false
+	}
+
+	if !warn_flag {
+		return nil
+	}
+
+	winfo := new(warninfo)
+	winfo.Ip = conf.GetIni().LocalAddr
+	winfo.Source = "index"
+	winfo.Title = "指标预警"
+	winfo.Severity = "3"
+	winfo.Summary = warn_content
+	winfo.NoticeEmpNo1 = v.EmpNo.String
+
+	jsonbytes, _ := json.Marshal(winfo)
+	glog.V(3).Infof("提交预警事件信息:%s", string(jsonbytes))
+	r, err := pub.PostJson(conf.GetIni().WarnAddr, string(jsonbytes))
+	glog.V(3).Infof("result:%s", r)
+	if err != nil {
+		glog.V(0).Infof("提交失败:%v", err)
 	}
 	return nil
 }

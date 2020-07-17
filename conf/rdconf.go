@@ -31,7 +31,9 @@ type CtabSpec struct {
 }
 
 type IniStruct struct {
-	Ver string
+	Ver       string
+	WarnAddr  string
+	LocalAddr string
 	DbInfo
 	CtabSpec
 }

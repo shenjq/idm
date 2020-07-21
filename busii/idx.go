@@ -382,21 +382,21 @@ func (idx *Index) warn() (err error) {
 	case '2': //不等于标准值
 		glog.V(3).Infof("Warn2:\n")
 		if float64(idx.Value) != v.Sv.Float64 {
-			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%f,不等于%f", idx.realId, v.Name, idx.Value, v.Sv.Float64)
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,不等于%.2f", idx.realId, v.Name, idx.Value, v.Sv.Float64)
 		} else {
 			warn_flag = false
 		}
 	case '3': //高于高水位
 		glog.V(3).Infof("Warn3:\n")
 		if float64(idx.Value) > v.Uv.Float64 {
-			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%f,大于%f", idx.realId, v.Name, idx.Value, v.Uv.Float64)
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,大于%.2f", idx.realId, v.Name, idx.Value, v.Uv.Float64)
 		} else {
 			warn_flag = false
 		}
 	case '4': //低于低水位
 		glog.V(3).Infof("Warn4:\n")
 		if float64(idx.Value) < v.Lv.Float64 {
-			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%f,小于%f", idx.realId, v.Name, idx.Value, v.Lv.Float64)
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,小于%.2f", idx.realId, v.Name, idx.Value, v.Lv.Float64)
 		} else {
 			warn_flag = false
 		}

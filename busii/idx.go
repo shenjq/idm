@@ -22,16 +22,18 @@ type Index struct {
 }
 
 type Idxinfo struct {
-	Id     string
-	Name   string
-	Note   string
-	Unit   string
-	EmpNo  sql.NullString
-	Flag   sql.NullString  //标识
-	Lv     sql.NullFloat64 //低水位
-	Sv     sql.NullFloat64 //标准水位
-	Uv     sql.NullFloat64 //高水位
-	Needup bool            //更新指标数据？
+	Id       string
+	Name     string
+	Note     string
+	Unit     string
+	EmpNo    sql.NullString
+	EmpNm    sql.NullString
+	Flag     sql.NullString  //标识
+	Lv       sql.NullFloat64 //低水位
+	Sv       sql.NullFloat64 //标准水位
+	Uv       sql.NullFloat64 //高水位
+	Needup   bool            //更新指标数据？
+	WarnFlag bool            //是否已经发送预警事件
 }
 type Result struct {
 	Index
@@ -88,7 +90,7 @@ func InitIdxinfo() (err error) {
 	var tmpmap = make(map[string]Idxinfo, 256)
 	glog.V(1).Info("start InitIdxinfo...")
 	idxif := new(Idxinfo)
-	rows, err := gIB.Db.Query("select a.id,a.name,a.note,a.unit,a.empno,b.flag,b.lv,b.sv,b.uv from idx_list a LEFT JOIN idx_warn b ON a.id=b.id;")
+	rows, err := gIB.Db.Query("select a.id,a.name,a.note,a.unit,a.empno,a.empnm,b.flag,b.lv,b.sv,b.uv from idx_list a LEFT JOIN idx_warn b ON a.id=b.id;")
 	if err != nil {
 		glog.V(0).Infof("Query failed,err:%v\n", err)
 		return err
@@ -100,7 +102,7 @@ func InitIdxinfo() (err error) {
 	}()
 
 	for rows.Next() {
-		err = rows.Scan(&idxif.Id, &idxif.Name, &idxif.Note, &idxif.Unit, &idxif.EmpNo, &idxif.Flag, &idxif.Lv, &idxif.Sv, &idxif.Uv) //不scan会导致连接不释放
+		err = rows.Scan(&idxif.Id, &idxif.Name, &idxif.Note, &idxif.Unit, &idxif.EmpNo, &idxif.EmpNm, &idxif.Flag, &idxif.Lv, &idxif.Sv, &idxif.Uv) //不scan会导致连接不释放
 		if err != nil {
 			glog.V(0).Infof("Scan failed,err:%v\n", err)
 			return
@@ -167,7 +169,7 @@ func (ib *IdxBusi) DoIdxBusi() {
 		} else {
 			r = Result{v, time.Now().Format("2006-01-02 15:04:05"), "ok"}
 		}
-		gResultMap[r.Id] = r
+		gResultMap[r.realId] = r
 	}
 }
 
@@ -369,6 +371,7 @@ func (idx *Index) warn() (err error) {
 
 	var warn_content string
 	warn_flag := true
+	severity := "3"
 	switch []byte(v.Flag.String)[1] {
 	case '1': //不在区间
 		glog.V(3).Infof("Warn1:\n")
@@ -390,6 +393,12 @@ func (idx *Index) warn() (err error) {
 		glog.V(3).Infof("Warn3:\n")
 		if float64(idx.Value) > v.Uv.Float64 {
 			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,大于%.2f", idx.realId, v.Name, idx.Value, v.Uv.Float64)
+			severity = "1"
+		} else if float64(idx.Value) > v.Sv.Float64 {
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,大于%.2f", idx.realId, v.Name, idx.Value, v.Sv.Float64)
+			severity = "2"
+		} else if float64(idx.Value) > v.Lv.Float64 {
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,大于%.2f", idx.realId, v.Name, idx.Value, v.Lv.Float64)
 		} else {
 			warn_flag = false
 		}
@@ -397,6 +406,12 @@ func (idx *Index) warn() (err error) {
 		glog.V(3).Infof("Warn4:\n")
 		if float64(idx.Value) < v.Lv.Float64 {
 			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,小于%.2f", idx.realId, v.Name, idx.Value, v.Lv.Float64)
+			severity = "1"
+		} else if float64(idx.Value) < v.Sv.Float64 {
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,小于%.2f", idx.realId, v.Name, idx.Value, v.Sv.Float64)
+			severity = "2"
+		} else if float64(idx.Value) < v.Uv.Float64 {
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,小于%.2f", idx.realId, v.Name, idx.Value, v.Uv.Float64)
 		} else {
 			warn_flag = false
 		}
@@ -405,17 +420,26 @@ func (idx *Index) warn() (err error) {
 		warn_flag = false
 	}
 
+	status := "1" //默认为打开
 	if !warn_flag {
-		return nil
+		if !v.WarnFlag {
+			return nil
+		} else {
+			v.WarnFlag = false
+			status = "2" //关闭事件请求
+		}
 	}
 
 	winfo := new(warninfo)
-	winfo.Ip = conf.GetIni().LocalAddr
+	winfo.Id_original = idx.realId
+	//winfo.Ip = conf.GetIni().LocalAddr //该处后续需改为上送指标实际对应资产
+	winfo.Ip = idx.Host
 	winfo.Source = "index"
 	winfo.Title = "指标预警"
-	winfo.Severity = "3"
+	winfo.Severity = severity
+	winfo.Status = status
 	winfo.Summary = warn_content
-	winfo.NoticeEmpNo1 = v.EmpNo.String
+	winfo.NoticeEmpNo1 = v.EmpNm.String
 
 	jsonbytes, _ := json.Marshal(winfo)
 	glog.V(3).Infof("提交预警事件信息:%s", string(jsonbytes))
@@ -423,6 +447,11 @@ func (idx *Index) warn() (err error) {
 	glog.V(3).Infof("result:%s", r)
 	if err != nil {
 		glog.V(0).Infof("提交失败:%v", err)
+		return err
+	}
+
+	if status == "1" {
+		v.WarnFlag = true
 	}
 	return nil
 }

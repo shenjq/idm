@@ -372,46 +372,51 @@ func (idx *Index) warn() (err error) {
 	var warn_content string
 	warn_flag := true
 	severity := "3"
+	str_now := delzero(fmt.Sprint("%.2f", idx.Value))
+	str_lv := delzero(fmt.Sprint("%.2f", v.Lv.Float64))
+	str_sv := delzero(fmt.Sprint("%.2f", v.Sv.Float64))
+	str_uv := delzero(fmt.Sprint("%.2f", v.Uv.Float64))
+
 	switch []byte(v.Flag.String)[1] {
 	case '1': //不在区间
 		glog.V(3).Infof("Warn1:\n")
 		if float64(idx.Value) > v.Uv.Float64 {
-			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,大于%.2f", idx.realId, v.Name, idx.Value, v.Uv.Float64)
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%s%s,大于%s", idx.realId, v.Name, str_now, v.Unit, str_uv)
 		} else if float64(idx.Value) < v.Lv.Float64 {
-			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,小于%.2f", idx.realId, v.Name, idx.Value, v.Lv.Float64)
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%s%s,小于%s", idx.realId, v.Name, str_now, v.Unit, str_lv)
 		} else {
 			warn_flag = false
 		}
 	case '2': //不等于标准值
 		glog.V(3).Infof("Warn2:\n")
 		if float64(idx.Value) != v.Sv.Float64 {
-			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,不等于%.2f", idx.realId, v.Name, idx.Value, v.Sv.Float64)
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%s%s,不等于%s", idx.realId, v.Name, str_now, v.Unit, str_sv)
 		} else {
 			warn_flag = false
 		}
 	case '3': //高于高水位
 		glog.V(3).Infof("Warn3:\n")
 		if float64(idx.Value) > v.Uv.Float64 {
-			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,大于%.2f", idx.realId, v.Name, idx.Value, v.Uv.Float64)
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%s%s,大于%s", idx.realId, v.Name, str_now, v.Unit, str_uv)
 			severity = "1"
 		} else if float64(idx.Value) > v.Sv.Float64 {
-			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,大于%.2f", idx.realId, v.Name, idx.Value, v.Sv.Float64)
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%s%s,大于%s", idx.realId, v.Name, str_now, v.Unit, str_sv)
 			severity = "2"
 		} else if float64(idx.Value) > v.Lv.Float64 {
-			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,大于%.2f", idx.realId, v.Name, idx.Value, v.Lv.Float64)
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%s%s,大于%s", idx.realId, v.Name, str_now, v.Unit, str_lv)
 		} else {
 			warn_flag = false
 		}
 	case '4': //低于低水位
 		glog.V(3).Infof("Warn4:\n")
 		if float64(idx.Value) < v.Lv.Float64 {
-			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,小于%.2f", idx.realId, v.Name, idx.Value, v.Lv.Float64)
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%s%s,小于%s", idx.realId, v.Name, str_now, v.Unit, str_lv)
 			severity = "1"
 		} else if float64(idx.Value) < v.Sv.Float64 {
-			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,小于%.2f", idx.realId, v.Name, idx.Value, v.Sv.Float64)
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%s%s,小于%s", idx.realId, v.Name, str_now, v.Unit, str_sv)
 			severity = "2"
 		} else if float64(idx.Value) < v.Uv.Float64 {
-			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%.2f,小于%.2f", idx.realId, v.Name, idx.Value, v.Uv.Float64)
+			warn_content = fmt.Sprintf("指标%s预警,%s,当前值%s%s,小于%s", idx.realId, v.Name, str_now, v.Unit, str_uv)
 		} else {
 			warn_flag = false
 		}
@@ -454,4 +459,24 @@ func (idx *Index) warn() (err error) {
 		v.WarnFlag = true
 	}
 	return nil
+}
+
+func delzero(s string) string {
+	byteStr := []byte(s)
+	if len(byteStr) == 0 {
+		return ""
+	}
+	i := len(byteStr) - 1
+	for i > 0 {
+		if byteStr[i] == '.' {
+			i--
+			break
+		}
+		if byteStr[i] == '0' {
+			i--
+		} else {
+			break
+		}
+	}
+	return string(byteStr[:i+1])
 }

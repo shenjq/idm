@@ -277,7 +277,7 @@ func (idx *Index) updateIdx() (err error) {
 	var v Idxinfo
 	v, e1 := gIdxMap[idx.realId]
 	if !e1 {
-		v2,e2 :=gIdxMap[idx.Id]
+		v2, e2 := gIdxMap[idx.Id]
 		if !e2 {
 			glog.V(0).Infof("query indexinfo err,%v", e2)
 			return fmt.Errorf("未定义指标[%s]", idx.Id)
@@ -431,16 +431,20 @@ func (idx *Index) warn() (err error) {
 
 	status := "1" //默认为打开
 	if !warn_flag {
-		if !v.WarnFlag {
+		if !v.WarnFlag { //事件未打开
 			return nil
 		} else {
-			v.WarnFlag = false
 			status = "2" //关闭事件请求
 		}
 	}
 
+	err, warnid := genWarnId(idx.realId)
+	if err != nil {
+		glog.V(0).Infof("genWarnId失败:%v", err)
+		return err
+	}
 	winfo := new(warninfo)
-	winfo.Id_original = idx.realId
+	winfo.Id_original = warnid
 	//winfo.Ip = conf.GetIni().LocalAddr //该处后续需改为上送指标实际对应资产
 	winfo.Ip = idx.Host
 	winfo.Source = "index"
@@ -461,8 +465,11 @@ func (idx *Index) warn() (err error) {
 
 	if status == "1" {
 		v.WarnFlag = true
-		gIdxMap[idx.realId] = v
+	} else if status == "2" {
+		v.WarnFlag = false
+		closeWarn(idx.realId)
 	}
+	gIdxMap[idx.realId] = v
 	return nil
 }
 
@@ -484,4 +491,53 @@ func delzero(s string) string {
 		}
 	}
 	return string(byteStr[:i+1])
+}
+
+func closeWarn(idxid string) (err error) {
+	sqlstr_up := `update idx_warn_count set iswarn=? where id=?`
+	_, err = pub.GetDb().Exec(sqlstr_up, false, idxid)
+	if err != nil {
+		glog.V(0).Infof("update  idx_warn_count err,%v", err)
+		return
+	}
+	return
+}
+
+func genWarnId(idxid string) (err error, warnid string) {
+
+	var num sql.NullInt32
+	var iswarn sql.NullBool
+
+	ct := pub.SelectCount("select count(id) count from idx_warn_count where id =?", idxid)
+	glog.V(3).Infof("判断是否首次插入，ct=%d\n", ct)
+	if ct == 0 {
+		sqlstr_inst := `insert into idx_warn_count (id,num,iswarn) values(?,?,?)`
+		_, err = pub.GetDb().Exec(sqlstr_inst, idxid, 1, true)
+		if err != nil {
+			glog.V(0).Infof("insert  idx_warn_count err,%v", err)
+			return
+		}
+		warnid = fmt.Sprintf("%s-%d", idxid, 1)
+		return
+	}
+
+	row := pub.QueryOneRow("select num,iswarn from idx_warn_count where id =?", idxid)
+	err = row.Scan(&num, &iswarn)
+	if err != nil {
+		glog.V(0).Infof("Scan failed,err:%v\n", err)
+		return
+	}
+	if iswarn.Bool { //当前预警事件打开状态，直接取当前值
+		warnid = fmt.Sprintf("%s-%d", idxid, num.Int32)
+		return
+	}
+
+	sqlstr_up := `update idx_warn_count set num=?,iswarn=? where id=?`
+	_, err = pub.GetDb().Exec(sqlstr_up, num.Int32+1, true, idxid)
+	if err != nil {
+		glog.V(0).Infof("update  idx_warn_count err,%v", err)
+		return
+	}
+	warnid = fmt.Sprintf("%s-%d", idxid, num.Int32+1)
+	return
 }

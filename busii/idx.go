@@ -263,11 +263,27 @@ func (ib *IdxBusi) prepareSql(str string) (stmt *sql.Stmt, err error) {
 }
 
 func (idx *Index) updateIdx() (err error) {
+	//考虑到类似共性类指标
+	//如主机ops、obs等，指标：020105X，该类指标最后一位为x，在写入idx_now,idx_his表时，将指标进行替换为020105CA3001
+	var needupdate bool
+	if strings.HasSuffix(idx.Id, "X") || strings.HasSuffix(idx.Id, "x") {
+		idx.realId = idx.Id[:len(idx.Id)-1] + strings.ToUpper(idx.Host)
+	} else {
+		idx.realId = idx.Id
+	}
+	glog.V(4).Infof("%s,%v\n", idx.realId, needupdate)
+
 	glog.V(3).Infof("###start updateIdx(),id=%s", idx.Id)
-	v, e := gIdxMap[idx.Id]
-	if !e {
-		glog.V(0).Infof("query indexinfo err,%v", e)
-		return fmt.Errorf("未定义指标[%s]", idx.Id)
+	var v Idxinfo
+	v, e1 := gIdxMap[idx.realId]
+	if !e1 {
+		v2,e2 :=gIdxMap[idx.Id]
+		if !e2 {
+			glog.V(0).Infof("query indexinfo err,%v", e2)
+			return fmt.Errorf("未定义指标[%s]", idx.Id)
+		} else {
+			v = v2
+		}
 	}
 	glog.V(6).Infof("Idxinfo:%v\n", v) //for debug
 
@@ -287,18 +303,6 @@ func (idx *Index) updateIdx() (err error) {
 		}
 	}()
 
-	//考虑到类似共性类指标
-	//如主机ops、obs等，指标：020105X，该类指标最后一位为x，在写入idx_now,idx_his表时，将指标进行替换为020105CA3001
-	var needupdate bool
-	if strings.HasSuffix(idx.Id, "X") || strings.HasSuffix(idx.Id, "x") {
-		idx.realId = idx.Id[:len(idx.Id)-1] + strings.ToUpper(idx.Host)
-		needupdate = false
-	} else {
-		needupdate = v.Needup
-		idx.realId = idx.Id
-	}
-	glog.V(4).Infof("%s,%v\n", idx.realId, needupdate)
-
 	tm := time.Now()
 	var result sql.Result
 	sqlstr_insthis := `insert into idx_his (id,time,host,value) values(?,?,?,?)`
@@ -311,7 +315,7 @@ func (idx *Index) updateIdx() (err error) {
 
 	sqlstr_instnow := `insert into idx_now (id,time,host,value) values(?,?,?,?)`
 	sqlstr_upnow := `update idx_now set time=?,host=?,value=? where id=?`
-	if needupdate {
+	if v.Needup {
 		result, err = tx.Exec(sqlstr_upnow, tm, idx.Host, idx.Value, idx.realId)
 		if err != nil {
 			glog.V(0).Infof("update idx_now err,%v", err)
@@ -341,7 +345,7 @@ func (idx *Index) updateIdx() (err error) {
 		}
 		glog.V(6).Infoln(result.RowsAffected())
 		v.Needup = true
-		gIdxMap[idx.Id] = v
+		gIdxMap[idx.realId] = v
 	}
 	return nil
 }
@@ -372,10 +376,10 @@ func (idx *Index) warn() (err error) {
 	var warn_content string
 	warn_flag := true
 	severity := "3"
-	str_now := delzero(fmt.Sprint("%.2f", idx.Value))
-	str_lv := delzero(fmt.Sprint("%.2f", v.Lv.Float64))
-	str_sv := delzero(fmt.Sprint("%.2f", v.Sv.Float64))
-	str_uv := delzero(fmt.Sprint("%.2f", v.Uv.Float64))
+	str_now := delzero(fmt.Sprintf("%.2f", idx.Value))
+	str_lv := delzero(fmt.Sprintf("%.2f", v.Lv.Float64))
+	str_sv := delzero(fmt.Sprintf("%.2f", v.Sv.Float64))
+	str_uv := delzero(fmt.Sprintf("%.2f", v.Uv.Float64))
 
 	switch []byte(v.Flag.String)[1] {
 	case '1': //不在区间
@@ -457,6 +461,7 @@ func (idx *Index) warn() (err error) {
 
 	if status == "1" {
 		v.WarnFlag = true
+		gIdxMap[idx.realId] = v
 	}
 	return nil
 }

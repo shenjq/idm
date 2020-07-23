@@ -22,18 +22,18 @@ type Index struct {
 }
 
 type Idxinfo struct {
-	Id       string
-	Name     string
-	Note     string
-	Unit     string
-	EmpNo    sql.NullString
-	EmpNm    sql.NullString
-	Flag     sql.NullString  //标识
-	Lv       sql.NullFloat64 //低水位
-	Sv       sql.NullFloat64 //标准水位
-	Uv       sql.NullFloat64 //高水位
-	Needup   bool            //更新指标数据？
-	WarnFlag bool            //是否已经发送预警事件
+	Id     string
+	Name   string
+	Note   string
+	Unit   string
+	EmpNo  sql.NullString
+	EmpNm  sql.NullString
+	Flag   sql.NullString  //标识
+	Lv     sql.NullFloat64 //低水位
+	Sv     sql.NullFloat64 //标准水位
+	Uv     sql.NullFloat64 //高水位
+	Needup bool            //更新指标数据？
+	IsWarn bool            //是否已经发送预警事件
 }
 type Result struct {
 	Index
@@ -265,13 +265,12 @@ func (ib *IdxBusi) prepareSql(str string) (stmt *sql.Stmt, err error) {
 func (idx *Index) updateIdx() (err error) {
 	//考虑到类似共性类指标
 	//如主机ops、obs等，指标：020105X，该类指标最后一位为x，在写入idx_now,idx_his表时，将指标进行替换为020105CA3001
-	var needupdate bool
 	if strings.HasSuffix(idx.Id, "X") || strings.HasSuffix(idx.Id, "x") {
 		idx.realId = idx.Id[:len(idx.Id)-1] + strings.ToUpper(idx.Host)
 	} else {
 		idx.realId = idx.Id
 	}
-	glog.V(4).Infof("%s,%v\n", idx.realId, needupdate)
+	glog.V(4).Infof("%s,%v\n", idx.realId)
 
 	glog.V(3).Infof("###start updateIdx(),id=%s", idx.Id)
 	var v Idxinfo
@@ -316,20 +315,14 @@ func (idx *Index) updateIdx() (err error) {
 	sqlstr_instnow := `insert into idx_now (id,time,host,value) values(?,?,?,?)`
 	sqlstr_upnow := `update idx_now set time=?,host=?,value=? where id=?`
 	if v.Needup {
+		glog.V(3).Infof("直接更新指标数据\n")
 		result, err = tx.Exec(sqlstr_upnow, tm, idx.Host, idx.Value, idx.realId)
 		if err != nil {
 			glog.V(0).Infof("update idx_now err,%v", err)
 			return
 		}
 		glog.V(6).Infoln(result.RowsAffected())
-	} else {
-		/*
-			var ct int8
-			err = gIB.Db.QueryRow(dbstr0, idx.Id).Scan(&ct)
-			if err != nil {
-				return
-			}
-		*/
+	} else { //重启或kill -SIGUSR1后一定会执行
 		ct := pub.SelectCount("select count(id) count from idx_now where id =?", idx.realId)
 		glog.V(3).Infof("判断是否需要插入指标数据，ct=%d\n", ct)
 		if ct == 0 {
@@ -345,6 +338,15 @@ func (idx *Index) updateIdx() (err error) {
 		}
 		glog.V(6).Infoln(result.RowsAffected())
 		v.Needup = true
+		var iswarn sql.NullBool
+		row := pub.QueryOneRow("select iswarn from idx_warn_count where id =?", idx.realId)
+		err = row.Scan( &iswarn)
+		if err != nil {
+			glog.V(0).Infof("Scan failed,err:%v\n", err)
+		}
+		if iswarn.Bool { //当前预警事件打开状态，更新内存表
+			v.IsWarn = true
+		}
 		gIdxMap[idx.realId] = v
 	}
 	return nil
@@ -372,6 +374,7 @@ func (idx *Index) warn() (err error) {
 		glog.V(3).Infof("指标[%s]未定义预警信息.\n", idx.Id)
 		return nil
 	}
+	glog.V(6).Infof("Idxinfo:%v\n", v) //for debug
 
 	var warn_content string
 	warn_flag := true
@@ -431,7 +434,7 @@ func (idx *Index) warn() (err error) {
 
 	status := "1" //默认为打开
 	if !warn_flag {
-		if !v.WarnFlag { //事件未打开
+		if !v.IsWarn { //事件未打开,存在问题：程序重启或执行kill -SIGUSR1后，该值被重置为false，事件恢复时无法关闭；
 			return nil
 		} else {
 			status = "2" //关闭事件请求
@@ -464,9 +467,9 @@ func (idx *Index) warn() (err error) {
 	}
 
 	if status == "1" {
-		v.WarnFlag = true
+		v.IsWarn = true
 	} else if status == "2" {
-		v.WarnFlag = false
+		v.IsWarn = false
 		closeWarn(idx.realId)
 	}
 	gIdxMap[idx.realId] = v

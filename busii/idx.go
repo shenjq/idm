@@ -340,15 +340,15 @@ func (idx *Index) updateIdx() (err error) {
 		v.Needup = true
 		var iswarn sql.NullBool
 		row1 := pub.QueryOneRow("select iswarn from idx_warn_count where id =?", idx.realId)
-		err = row1.Scan( &iswarn)
+		err = row1.Scan(&iswarn)
 		if err != nil { //首次无记录会报错
 			glog.V(0).Infof("Scan failed,err:%v\n", err)
 		}
 		if iswarn.Bool { //当前预警事件打开状态，更新内存表
 			v.IsWarn = true
 		}
-		row2 := pub.QueryOneRow("select flag,lv,sv,uv from idx_warn where id=?;",idx.realId)
-		err = row2.Scan( &v.Flag,&v.Lv,&v.Sv,&v.Uv)
+		row2 := pub.QueryOneRow("select flag,lv,sv,uv from idx_warn where id=?;", idx.realId)
+		err = row2.Scan(&v.Flag, &v.Lv, &v.Sv, &v.Uv)
 		if err != nil {
 			glog.V(0).Infof("Scan failed,err:%v\n", err)
 		}
@@ -363,6 +363,7 @@ func (idx *Index) warn() (err error) {
 		Id_original  string `json:"id_original"`
 		Source       string `json:"source"`
 		Ip           string `json:"ip"`
+		Hostname     string `json:"hostname"`
 		Severity     string `json:"severity"`
 		Title        string `json:"title"`
 		Summary      string `json:"summary"`
@@ -454,12 +455,18 @@ func (idx *Index) warn() (err error) {
 	}
 	winfo := new(warninfo)
 	winfo.Id_original = warnid
-	//winfo.Ip = conf.GetIni().LocalAddr //该处后续需改为上送指标实际对应资产
-	winfo.Ip = idx.Host
+	if len(strings.TrimSpace(idx.Host)) == 0 {
+		winfo.Ip = conf.GetIni().LocalAddr //指标服务器地址
+	} else if strings.Count(idx.Host, ".") == 3 {
+		winfo.Ip = idx.Host
+	} else {
+		winfo.Hostname = idx.Host
+	}
 	winfo.Source = "index"
 	winfo.Title = "指标预警"
 	winfo.Severity = severity
 	winfo.Status = status
+	winfo.ShowTimes = "1800"
 	winfo.Summary = warn_content
 	winfo.NoticeEmpNo1 = v.EmpNm.String
 

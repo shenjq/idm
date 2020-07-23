@@ -270,7 +270,7 @@ func (idx *Index) updateIdx() (err error) {
 	} else {
 		idx.realId = idx.Id
 	}
-	glog.V(4).Infof("%s,%v\n", idx.realId)
+	glog.V(4).Infof("通用指标，RealId:%s\n", idx.realId)
 
 	glog.V(3).Infof("###start updateIdx(),id=%s", idx.Id)
 	var v Idxinfo
@@ -297,7 +297,7 @@ func (idx *Index) updateIdx() (err error) {
 			glog.V(0).Infoln("rollback!!!!!!")
 			tx.Rollback()
 		} else {
-			glog.V(6).Infof("###updateIdx() success,id=%s", idx.Id)
+			glog.V(6).Infof("###updateIdx() success,id=%s", idx.realId)
 			tx.Commit()
 		}
 	}()
@@ -324,7 +324,7 @@ func (idx *Index) updateIdx() (err error) {
 		glog.V(6).Infoln(result.RowsAffected())
 	} else { //重启或kill -SIGUSR1后一定会执行
 		ct := pub.SelectCount("select count(id) count from idx_now where id =?", idx.realId)
-		glog.V(3).Infof("判断是否需要插入指标数据，ct=%d\n", ct)
+		glog.V(3).Infof("判断是否首次插入idx_now指标数据，ct=%d\n", ct)
 		if ct == 0 {
 			result, err = tx.Exec(sqlstr_instnow, idx.realId, tm, idx.Host, idx.Value)
 			//result,err = gIB.stmt_instnow.Exec(idx.Id, tm, idx.Host, idx.Value)
@@ -339,14 +339,20 @@ func (idx *Index) updateIdx() (err error) {
 		glog.V(6).Infoln(result.RowsAffected())
 		v.Needup = true
 		var iswarn sql.NullBool
-		row := pub.QueryOneRow("select iswarn from idx_warn_count where id =?", idx.realId)
-		err = row.Scan( &iswarn)
-		if err != nil {
+		row1 := pub.QueryOneRow("select iswarn from idx_warn_count where id =?", idx.realId)
+		err = row1.Scan( &iswarn)
+		if err != nil { //首次无记录会报错
 			glog.V(0).Infof("Scan failed,err:%v\n", err)
 		}
 		if iswarn.Bool { //当前预警事件打开状态，更新内存表
 			v.IsWarn = true
 		}
+		row2 := pub.QueryOneRow("select flag,lv,sv,uv from idx_warn where id=?;",idx.realId)
+		err = row2.Scan( &v.Flag,&v.Lv,&v.Sv,&v.Uv)
+		if err != nil {
+			glog.V(0).Infof("Scan failed,err:%v\n", err)
+		}
+		v.Id = idx.realId
 		gIdxMap[idx.realId] = v
 	}
 	return nil
@@ -512,7 +518,7 @@ func genWarnId(idxid string) (err error, warnid string) {
 	var iswarn sql.NullBool
 
 	ct := pub.SelectCount("select count(id) count from idx_warn_count where id =?", idxid)
-	glog.V(3).Infof("判断是否首次插入，ct=%d\n", ct)
+	glog.V(3).Infof("判断是否首次插入idx_warn_count，ct=%d\n", ct)
 	if ct == 0 {
 		sqlstr_inst := `insert into idx_warn_count (id,num,iswarn) values(?,?,?)`
 		_, err = pub.GetDb().Exec(sqlstr_inst, idxid, 1, true)

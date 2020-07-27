@@ -22,18 +22,20 @@ type Index struct {
 }
 
 type Idxinfo struct {
-	Id     string
-	Name   string
-	Note   string
-	Unit   string
-	EmpNo  sql.NullString
-	EmpNm  sql.NullString
-	Flag   sql.NullString  //标识
-	Lv     sql.NullFloat64 //低水位
-	Sv     sql.NullFloat64 //标准水位
-	Uv     sql.NullFloat64 //高水位
-	Needup bool            //更新指标数据？
-	IsWarn bool            //是否已经发送预警事件
+	Id                string
+	Name              string
+	Note              string
+	Unit              string
+	EmpNo             sql.NullString
+	EmpNm             sql.NullString
+	Flag              sql.NullString  //标识
+	Lv                sql.NullFloat64 //低水位
+	Sv                sql.NullFloat64 //标准水位
+	Uv                sql.NullFloat64 //高水位
+	WarnNum           int             //告警次数大于该值，发送预警事件,默认值=0
+	Needup            bool            //更新指标数据？
+	IsWarn            bool            //是否已经发送预警事件
+	ContinuousWarnNum int             //连续预警次数
 }
 type Result struct {
 	Index
@@ -90,7 +92,7 @@ func InitIdxinfo() (err error) {
 	var tmpmap = make(map[string]Idxinfo, 256)
 	glog.V(1).Info("start InitIdxinfo...")
 	idxif := new(Idxinfo)
-	rows, err := gIB.Db.Query("select a.id,a.name,a.note,a.unit,a.empno,a.empnm,b.flag,b.lv,b.sv,b.uv from idx_list a LEFT JOIN idx_warn b ON a.id=b.id;")
+	rows, err := gIB.Db.Query("select a.id,a.name,a.note,a.unit,a.empno,a.empnm,b.flag,b.lv,b.sv,b.uv,b.warnnum from idx_list a LEFT JOIN idx_warn b ON a.id=b.id;")
 	if err != nil {
 		glog.V(0).Infof("Query failed,err:%v\n", err)
 		return err
@@ -102,7 +104,7 @@ func InitIdxinfo() (err error) {
 	}()
 
 	for rows.Next() {
-		err = rows.Scan(&idxif.Id, &idxif.Name, &idxif.Note, &idxif.Unit, &idxif.EmpNo, &idxif.EmpNm, &idxif.Flag, &idxif.Lv, &idxif.Sv, &idxif.Uv) //不scan会导致连接不释放
+		err = rows.Scan(&idxif.Id, &idxif.Name, &idxif.Note, &idxif.Unit, &idxif.EmpNo, &idxif.EmpNm, &idxif.Flag, &idxif.Lv, &idxif.Sv, &idxif.Uv, &idxif.WarnNum) //不scan会导致连接不释放
 		if err != nil {
 			glog.V(0).Infof("Scan failed,err:%v\n", err)
 			return
@@ -371,6 +373,7 @@ func (idx *Index) warn() (err error) {
 		ShowTimes    string `json:"showtimes"`
 		NoticeEmpNo1 string `json:"noticeempno1"`
 		NoticeEmpNo2 string `json:"noticeempno2"`
+		NoticeEmpNo3 string `json:"noticeempno3"`
 	}
 	var v Idxinfo
 	v, ok := gIdxMap[idx.realId] //先找自有值，未找到情况再找公共值
@@ -441,11 +444,27 @@ func (idx *Index) warn() (err error) {
 
 	status := "1" //默认为打开
 	if !warn_flag {
-		if !v.IsWarn { //事件未打开,存在问题：程序重启或执行kill -SIGUSR1后，该值被重置为false，事件恢复时无法关闭；
+		if !v.IsWarn { //事件未打开
 			return nil
 		} else {
 			status = "2" //关闭事件请求
 		}
+	}
+
+	if status == "1" {
+		v.IsWarn = true
+		v.ContinuousWarnNum++
+
+	} else if status == "2" {
+		v.IsWarn = false
+		v.ContinuousWarnNum = 0
+		closeWarn(idx.realId)
+	}
+	gIdxMap[idx.realId] = v
+
+	if status == "1" && v.ContinuousWarnNum < v.WarnNum {
+		glog.V(3).Infof("指标[%s]连续预警次数%d,预警次数%d,不发送预警事件.\n", idx.realId, v.ContinuousWarnNum, v.WarnNum)
+		return nil
 	}
 
 	err, warnid := genWarnId(idx.realId)
@@ -468,7 +487,14 @@ func (idx *Index) warn() (err error) {
 	winfo.Status = status
 	winfo.ShowTimes = "1800"
 	winfo.Summary = warn_content
-	winfo.NoticeEmpNo1 = v.EmpNm.String
+	noticeEmp := strings.Split(v.EmpNm.String, "|")
+	winfo.NoticeEmpNo1 = noticeEmp[0]
+	if len(noticeEmp) >= 2 {
+		winfo.NoticeEmpNo2 = noticeEmp[1]
+	}
+	if len(noticeEmp) >= 3 {
+		winfo.NoticeEmpNo3 = noticeEmp[2]
+	}
 
 	jsonbytes, _ := json.Marshal(winfo)
 	glog.V(3).Infof("提交预警事件信息:%s", string(jsonbytes))
@@ -479,13 +505,6 @@ func (idx *Index) warn() (err error) {
 		return err
 	}
 
-	if status == "1" {
-		v.IsWarn = true
-	} else if status == "2" {
-		v.IsWarn = false
-		closeWarn(idx.realId)
-	}
-	gIdxMap[idx.realId] = v
 	return nil
 }
 

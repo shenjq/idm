@@ -32,10 +32,10 @@ type Idxinfo struct {
 	Lv                sql.NullFloat64 //低水位
 	Sv                sql.NullFloat64 //标准水位
 	Uv                sql.NullFloat64 //高水位
-	WarnNum           int             //告警次数大于该值，发送预警事件,默认值=0
+	WarnNum           sql.NullInt32   //告警次数大于该值，发送预警事件,默认值=0
 	Needup            bool            //更新指标数据？
 	IsWarn            bool            //是否已经发送预警事件
-	ContinuousWarnNum int             //连续预警次数
+	ContinuousWarnNum int32           //连续预警次数
 }
 type Result struct {
 	Index
@@ -462,7 +462,7 @@ func (idx *Index) warn() (err error) {
 	}
 	gIdxMap[idx.realId] = v
 
-	if status == "1" && v.ContinuousWarnNum < v.WarnNum {
+	if status == "1" && v.ContinuousWarnNum < v.WarnNum.Int32 {
 		glog.V(3).Infof("指标[%s]连续预警次数%d,预警次数%d,不发送预警事件.\n", idx.realId, v.ContinuousWarnNum, v.WarnNum)
 		return nil
 	}

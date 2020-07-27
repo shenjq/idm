@@ -464,7 +464,7 @@ func (idx *Index) warn() (err error) {
 	gIdxMap[idx.realId] = v
 
 	if status == "1" && v.ContinuousWarnNum < v.WarnNum.Int32 {
-		glog.V(3).Infof("指标[%s]连续预警次数%d,预警次数%d,不发送预警事件.\n", idx.realId, v.ContinuousWarnNum, v.WarnNum)
+		glog.V(3).Infof("指标[%s]连续预警次数%d,预警次数%d,不发送预警事件.\n", idx.realId, v.ContinuousWarnNum, v.WarnNum.Int32)
 		return nil
 	}
 

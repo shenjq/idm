@@ -349,8 +349,9 @@ func (idx *Index) updateIdx() (err error) {
 		if iswarn.Bool { //当前预警事件打开状态，更新内存表
 			v.IsWarn = true
 		}
-		row2 := pub.QueryOneRow("select flag,lv,sv,uv from idx_warn where id=?;", idx.realId)
-		err = row2.Scan(&v.Flag, &v.Lv, &v.Sv, &v.Uv)
+		//在通用指标时，需更新内存表中该指标信息
+		row2 := pub.QueryOneRow("select flag,lv,sv,uv,warnnum from idx_warn where id=?;", idx.realId)
+		err = row2.Scan(&v.Flag, &v.Lv, &v.Sv, &v.Uv,&v.WarnNum)
 		if err != nil {
 			glog.V(0).Infof("Scan failed,err:%v\n", err)
 		}

@@ -351,7 +351,7 @@ func (idx *Index) updateIdx() (err error) {
 		}
 		//在通用指标时，需更新内存表中该指标信息
 		row2 := pub.QueryOneRow("select flag,lv,sv,uv,warnnum from idx_warn where id=?;", idx.realId)
-		err = row2.Scan(&v.Flag, &v.Lv, &v.Sv, &v.Uv,&v.WarnNum)
+		err = row2.Scan(&v.Flag, &v.Lv, &v.Sv, &v.Uv, &v.WarnNum)
 		if err != nil {
 			glog.V(0).Infof("Scan failed,err:%v\n", err)
 		}
@@ -363,18 +363,16 @@ func (idx *Index) updateIdx() (err error) {
 
 func (idx *Index) warn() (err error) {
 	type warninfo struct {
-		Id_original  string `json:"id_original"`
-		Source       string `json:"source"`
-		Ip           string `json:"ip"`
-		Hostname     string `json:"hostname"`
-		Severity     string `json:"severity"`
-		Title        string `json:"title"`
-		Summary      string `json:"summary"`
-		Status       string `json:"status"`
-		ShowTimes    string `json:"showtimes"`
-		NoticeEmpNo1 string `json:"noticeempno1"`
-		NoticeEmpNo2 string `json:"noticeempno2"`
-		NoticeEmpNo3 string `json:"noticeempno3"`
+		Id_original string `json:"id_original"`
+		Source      string `json:"source"`
+		Ip          string `json:"ip"`
+		Hostname    string `json:"hostname"`
+		Severity    string `json:"severity"`
+		Title       string `json:"title"`
+		Summary     string `json:"summary"`
+		Status      string `json:"status"`
+		ShowTimes   string `json:"showtimes"`
+		NoticeEmpNo string `json:"noticeempno"`
 	}
 	var v Idxinfo
 	v, ok := gIdxMap[idx.realId] //先找自有值，未找到情况再找公共值
@@ -461,14 +459,14 @@ func (idx *Index) warn() (err error) {
 		v.ContinuousWarnNum = 0
 		closeWarn(idx.realId)
 	}
-	gIdxMap[idx.realId] = v
+	gIdxMap[idx.realId] = v //更新覆盖原map对应值
 
 	if status == "1" && v.ContinuousWarnNum < v.WarnNum.Int32 {
 		glog.V(3).Infof("指标[%s]连续预警次数%d,预警次数%d,不发送预警事件.\n", idx.realId, v.ContinuousWarnNum, v.WarnNum.Int32)
 		return nil
 	}
 
-	err, warnid := genWarnId(idx.realId)
+	err, warnid := genWarnId(idx.realId) //暂时由本地自行维护id，后续可根据需要通过将indexid作为ectype进行上送；
 	if err != nil {
 		glog.V(0).Infof("genWarnId失败:%v", err)
 		return err
@@ -488,13 +486,8 @@ func (idx *Index) warn() (err error) {
 	winfo.Status = status
 	winfo.ShowTimes = "1800"
 	winfo.Summary = warn_content
-	noticeEmp := strings.Split(v.EmpNm.String, "|")
-	winfo.NoticeEmpNo1 = noticeEmp[0]
-	if len(noticeEmp) >= 2 {
-		winfo.NoticeEmpNo2 = noticeEmp[1]
-	}
-	if len(noticeEmp) >= 3 {
-		winfo.NoticeEmpNo3 = noticeEmp[2]
+	if v.EmpNm.Valid {
+		winfo.NoticeEmpNo = v.EmpNm.String
 	}
 
 	jsonbytes, _ := json.Marshal(winfo)

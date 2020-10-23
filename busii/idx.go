@@ -466,7 +466,7 @@ func (idx *Index) warn() (err error) {
 		return nil
 	}
 
-	err, warnid := genWarnId(idx.realId) //暂时由本地自行维护id，后续可根据需要通过将indexid作为ectype进行上送；
+	err, warnid := genWarnId(idx.realId,status) //暂时由本地自行维护id，后续可根据需要通过将indexid作为ectype进行上送；
 	if err != nil {
 		glog.V(0).Infof("genWarnId失败:%v", err)
 		return err
@@ -532,7 +532,7 @@ func closeWarn(idxid string) (err error) {
 	return
 }
 
-func genWarnId(idxid string) (err error, warnid string) {
+func genWarnId(idxid ,status string) (err error, warnid string) {
 
 	var num sql.NullInt32
 	var iswarn sql.NullBool
@@ -556,7 +556,7 @@ func genWarnId(idxid string) (err error, warnid string) {
 		glog.V(0).Infof("Scan failed,err:%v\n", err)
 		return
 	}
-	if iswarn.Bool { //当前预警事件打开状态，直接取当前值
+	if status == "2" { //当前预警事件打开状态，直接取当前值
 		warnid = fmt.Sprintf("%s-%d", idxid, num.Int32)
 		return
 	}
